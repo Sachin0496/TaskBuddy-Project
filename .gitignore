@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+
+# Sensitive files
+credentials.json
+token.json
+*.env
+
+# Screenpipe binary
+src/screenpipe/screenpipe.exe
+src/screenpipe/*.exe
+
+# Misc
+*.log
+*.mp4
+.screenpipe/
