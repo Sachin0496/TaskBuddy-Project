@@ -10,6 +10,9 @@ import os.path
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from notion_client import Client
+from datetime import datetime, UTC
+import datetime
+
 
 groq_client = Groq(api_key="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")
 
@@ -38,25 +41,37 @@ def process_with_groq(screen_data):
 
 def get_calendar_events():
     creds = None
+    scopes = [
+        'https://www.googleapis.com/auth/calendar.events',
+        'https://www.googleapis.com/auth/calendar'
+    ]
     if os.path.exists('token.json'):
-        creds = Credentials.from_authorized_user_file('token.json', ['https://www.googleapis.com/auth/calendar.readonly'])
+        creds = Credentials.from_authorized_user_file('token.json', scopes)
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            flow = InstalledAppFlow.from_client_secrets_file('credentials.json', ['https://www.googleapis.com/auth/calendar.readonly'])
+            flow = InstalledAppFlow.from_client_secrets_file('credentials.json', scopes)
             creds = flow.run_local_server(port=0)
             with open('token.json', 'w') as token:
                 token.write(creds.to_json())
     service = build('calendar', 'v3', credentials=creds)
-    events_result = service.events().list(calendarId='primary', maxResults=5, singleEvents=True, orderBy='startTime').execute()
+    now = datetime.datetime.utcnow().isoformat() + 'Z'
+    events_result = service.events().list(calendarId='primary', timeMin=now, maxResults=5, singleEvents=True, orderBy='startTime').execute()
     events = events_result.get('items', [])
     return "\n".join([f"{event['start'].get('dateTime', event['start'].get('date'))}: {event['summary']}" for event in events]) or "No events"
 
 def get_notion_tasks(notion_token, database_id):
-    notion = Client(auth=notion_token)
-    results = notion.databases.query(database_id=database_id).get("results", [])
-    return "\n".join([f"{page['properties']['Name']['title'][0]['text']['content']}" for page in results if page['properties']['Name']['title']]) or "No tasks"
+    try:
+        notion = Client(auth=notion_token)
+        results = notion.databases.query(database_id=database_id).get("results", [])
+        return "\n".join([f"{page['properties']['Name']['title'][0]['text']['content']}" for page in results if page['properties']['Name']['title']]) or "No tasks"
+    except Exception as e:
+        return f"Notion error: {e}"
+
+def delete_calendar_event(service, event_id):
+    service.events().delete(calendarId='primary', eventId=event_id).execute()
+    return f"Deleted event: {event_id}"
 
 class TaskBuddyApp:
     def __init__(self, root):
@@ -99,12 +114,17 @@ class TaskBuddyApp:
         self.thread.start()
 
     def update_loop(self):
-        notion_token = "your-notion-token"  # Replace
-        database_id = "your-database-id"   # Replace
+        notion_token = "ntn_S64301911062taY4BlLABKXTNkIdSgI973JJivJ7CUl4Ov"
+        database_id = "1d117f44-ee02-80a0-b40c-f9f3a6e5d7f6"  # Hyphenated
+        scopes = ['https://www.googleapis.com/auth/calendar.events', 'https://www.googleapis.com/auth/calendar']
         while self.running:
             screen_content = capture_screen_data()
             suggestion = process_with_groq(screen_content)
             calendar_events = get_calendar_events()
+            creds = Credentials.from_authorized_user_file('token.json', scopes) if os.path.exists('token.json') else None
+            if creds and creds.valid:
+                service = build('calendar', 'v3', credentials=creds)
+                add_calendar_event(service, "Test Event", "2025-04-11T10:00:00Z", "2025-04-11T11:00:00Z")
             notion_tasks = get_notion_tasks(notion_token, database_id)
             self.update_gui(screen_content, suggestion, calendar_events, notion_tasks)
             time.sleep(30)
@@ -120,8 +140,8 @@ class TaskBuddyApp:
         self.notion_text.insert(tk.END, notion_tasks)
 
     def refresh_data(self):
-        notion_token = "your-notion-token"  # Replace
-        database_id = "your-database-id"   # Replace
+        notion_token = "ntn_S64301911062taY4BlLABKXTNkIdSgI973JJivJ7CUl4Ov"
+        database_id = "1d117f44-ee02-80a0-b40c-f9f3a6e5d7f6"
         screen_content = capture_screen_data()
         suggestion = process_with_groq(screen_content)
         calendar_events = get_calendar_events()
