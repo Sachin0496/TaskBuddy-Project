@@ -1,55 +1,139 @@
 import requests
 from groq import Groq
+import tkinter as tk
+from tkinter import scrolledtext, ttk
+import threading
 import time
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+import os.path
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from notion_client import Client
 
-# Initialize Groq client with hardcoded API key
 groq_client = Groq(api_key="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")
 
-# Fetch screen data from Screenpipe
 def capture_screen_data():
     try:
         response = requests.get("http://localhost:3030/search?q=&limit=1&content_type=ocr", timeout=5)
         response.raise_for_status()
         data = response.json()
-        print(f"Raw Screenpipe response: {data}")  # Debug: see full response
         if data.get("data") and len(data["data"]) > 0:
-            return data["data"][0]["content"].get("text", "No text found on screen")
+            return data["data"][0]["content"].get("text", "No text found")
         return "No data returned"
     except requests.RequestException as e:
-        return f"Error fetching screen data: {e}"
+        return f"Error: {e}"
 
-# Process screen data with Groq and get suggestions
 def process_with_groq(screen_data):
-    prompt = f"""
-    Analyze the following screen content and provide a smart productivity suggestion:
-    "{screen_data}"
-    """
+    prompt = f"Analyze the following screen content and provide a smart productivity suggestion:\n\"{screen_data}\""
     try:
         response = groq_client.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
             model="llama3-70b-8192",
             max_tokens=100
         )
-        print(f"Raw Groq response: {response}")  # Debug: see full response
         return response.choices[0].message.content
     except Exception as e:
-        print(f"Groq error: {e}")  # Debug: log the exact error
         return f"Error processing with Groq: {e}"
 
-# Main loop
-def task_buddy():
-    print("TaskBuddy is running. Monitoring your screen...")
-    while True:
-        # Capture screen data
+def get_calendar_events():
+    creds = None
+    if os.path.exists('token.json'):
+        creds = Credentials.from_authorized_user_file('token.json', ['https://www.googleapis.com/auth/calendar.readonly'])
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file('credentials.json', ['https://www.googleapis.com/auth/calendar.readonly'])
+            creds = flow.run_local_server(port=0)
+            with open('token.json', 'w') as token:
+                token.write(creds.to_json())
+    service = build('calendar', 'v3', credentials=creds)
+    events_result = service.events().list(calendarId='primary', maxResults=5, singleEvents=True, orderBy='startTime').execute()
+    events = events_result.get('items', [])
+    return "\n".join([f"{event['start'].get('dateTime', event['start'].get('date'))}: {event['summary']}" for event in events]) or "No events"
+
+def get_notion_tasks(notion_token, database_id):
+    notion = Client(auth=notion_token)
+    results = notion.databases.query(database_id=database_id).get("results", [])
+    return "\n".join([f"{page['properties']['Name']['title'][0]['text']['content']}" for page in results if page['properties']['Name']['title']]) or "No tasks"
+
+class TaskBuddyApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("TaskBuddy")
+        self.root.geometry("600x400")
+
+        self.notebook = ttk.Notebook(root)
+        self.screen_frame = ttk.Frame(self.notebook)
+        self.suggest_frame = ttk.Frame(self.notebook)
+        self.calendar_frame = ttk.Frame(self.notebook)
+        self.notion_frame = ttk.Frame(self.notebook)
+        self.notebook.add(self.screen_frame, text="Screen Content")
+        self.notebook.add(self.suggest_frame, text="Suggestions")
+        self.notebook.add(self.calendar_frame, text="Calendar")
+        self.notebook.add(self.notion_frame, text="Notion Tasks")
+        self.notebook.pack(pady=5, fill="both", expand=True)
+
+        ttk.Label(self.screen_frame, text="Screen Content:").pack(pady=5)
+        self.screen_text = scrolledtext.ScrolledText(self.screen_frame, width=70, height=10, wrap=tk.WORD)
+        self.screen_text.pack(pady=5)
+
+        ttk.Label(self.suggest_frame, text="TaskBuddy Suggests:").pack(pady=5)
+        self.suggest_text = scrolledtext.ScrolledText(self.suggest_frame, width=70, height=10, wrap=tk.WORD)
+        self.suggest_text.pack(pady=5)
+
+        ttk.Label(self.calendar_frame, text="Upcoming Events:").pack(pady=5)
+        self.calendar_text = scrolledtext.ScrolledText(self.calendar_frame, width=70, height=10, wrap=tk.WORD)
+        self.calendar_text.pack(pady=5)
+
+        ttk.Label(self.notion_frame, text="Notion Tasks:").pack(pady=5)
+        self.notion_text = scrolledtext.ScrolledText(self.notion_frame, width=70, height=10, wrap=tk.WORD)
+        self.notion_text.pack(pady=5)
+
+        self.refresh_button = ttk.Button(root, text="Refresh", command=self.refresh_data)
+        self.refresh_button.pack(pady=10)
+
+        self.running = True
+        self.thread = threading.Thread(target=self.update_loop, daemon=True)
+        self.thread.start()
+
+    def update_loop(self):
+        notion_token = "your-notion-token"  # Replace
+        database_id = "your-database-id"   # Replace
+        while self.running:
+            screen_content = capture_screen_data()
+            suggestion = process_with_groq(screen_content)
+            calendar_events = get_calendar_events()
+            notion_tasks = get_notion_tasks(notion_token, database_id)
+            self.update_gui(screen_content, suggestion, calendar_events, notion_tasks)
+            time.sleep(30)
+
+    def update_gui(self, screen_content, suggestion, calendar_events, notion_tasks):
+        self.screen_text.delete(1.0, tk.END)
+        self.screen_text.insert(tk.END, screen_content)
+        self.suggest_text.delete(1.0, tk.END)
+        self.suggest_text.insert(tk.END, suggestion)
+        self.calendar_text.delete(1.0, tk.END)
+        self.calendar_text.insert(tk.END, calendar_events)
+        self.notion_text.delete(1.0, tk.END)
+        self.notion_text.insert(tk.END, notion_tasks)
+
+    def refresh_data(self):
+        notion_token = "your-notion-token"  # Replace
+        database_id = "your-database-id"   # Replace
         screen_content = capture_screen_data()
-        print(f"Screen content: {screen_content}")
-        
-        # Process with Groq and get suggestion
         suggestion = process_with_groq(screen_content)
-        print(f"TaskBuddy suggests: {suggestion}")
-        
-        # Wait before next check (e.g., every 30 seconds)
-        time.sleep(30)
+        calendar_events = get_calendar_events()
+        notion_tasks = get_notion_tasks(notion_token, database_id)
+        self.update_gui(screen_content, suggestion, calendar_events, notion_tasks)
+
+    def on_closing(self):
+        self.running = False
+        self.root.destroy()
 
 if __name__ == "__main__":
-    task_buddy()
+    root = tk.Tk()
+    app = TaskBuddyApp(root)
+    root.protocol("WM_DELETE_WINDOW", app.on_closing)
+    root.mainloop()
