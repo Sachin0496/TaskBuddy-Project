@@ -15,5 +15,5 @@ A productivity tool integrating Screenpipe for screen monitoring and Groq for sm
 ## Installation
 1. **Clone the Repository**:
    ```bash
-   git clone https://github.com/your-username/TaskBuddy-Project.git
+   git clone https://github.com/Sachin0496as/TaskBuddy-Project.git
    cd TaskBuddy-Project
