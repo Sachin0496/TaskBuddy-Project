@@ -5,3 +5,6 @@
 3. Planned GUI branch with Calendar/Notion integrations.
 4.## Issues
 - Notion `404` persists despite correct ID and 'Connections.' Added error handling to GUI.
+## notion being kept away
+## Refresh Fix
+- Linked Refresh button in `ui.py` to backend `refresh_data` in `taskbuddy.py`.
